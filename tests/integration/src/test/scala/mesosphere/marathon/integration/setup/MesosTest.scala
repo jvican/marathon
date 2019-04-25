@@ -29,7 +29,9 @@ case class MesosConfig(
     launcher: String = "posix",
     containerizers: String = "mesos",
     isolation: Option[String] = None,
-    imageProviders: Option[String] = None)
+    imageProviders: Option[String] = None,
+    secCompConfigDir: Option[String] = None,
+    secCompProfileName: Option[String] = None)
 
 case class MesosCluster(
     suiteName: String,
@@ -53,20 +55,21 @@ case class MesosCluster(
   lazy val masters = 0.until(numMasters).map { i =>
     val faultDomainJson = if (mastersFaultDomains.nonEmpty && mastersFaultDomains(i).nonEmpty) {
       val faultDomain = mastersFaultDomains(i).get
-      val faultDomainJson = s"""
-                               |{
-                               |  "fault_domain":
-                               |    {
-                               |      "region":
-                               |        {
-                               |          "name": "${faultDomain.region}"
-                               |        },
-                               |      "zone":
-                               |        {
-                               |          "name": "${faultDomain.zone}"
-                               |        }
-                               |    }
-                               |}
+      val faultDomainJson =
+        s"""
+           |{
+           |  "fault_domain":
+           |    {
+           |      "region":
+           |        {
+           |          "name": "${faultDomain.region}"
+           |        },
+           |      "zone":
+           |        {
+           |          "name": "${faultDomain.zone}"
+           |        }
+           |    }
+           |}
         """.stripMargin
       Some(faultDomainJson)
     } else None
@@ -86,20 +89,21 @@ case class MesosCluster(
 
     val (faultDomainAgentAttributes: Map[String, Option[String]], mesosFaultDomainAgentCmdOption) = if (agentsFaultDomains.nonEmpty && agentsFaultDomains(i).nonEmpty) {
       val faultDomain = agentsFaultDomains(i).get
-      val mesosFaultDomainCmdOption = s"""
-          |{
-          |  "fault_domain":
-          |    {
-          |      "region":
-          |        {
-          |          "name": "${faultDomain.region}"
-          |        },
-          |      "zone":
-          |        {
-          |          "name": "${faultDomain.zone}"
-          |        }
-          |    }
-          |}
+      val mesosFaultDomainCmdOption =
+        s"""
+           |{
+           |  "fault_domain":
+           |    {
+           |      "region":
+           |        {
+           |          "name": "${faultDomain.region}"
+           |        },
+           |      "zone":
+           |        {
+           |          "name": "${faultDomain.zone}"
+           |        }
+           |    }
+           |}
         """.stripMargin
 
       val nodeAttributes = Map(
@@ -227,10 +231,15 @@ case class MesosCluster(
          |${cpus.fold("")(c => s"cpus:$c;")}
          |${mem.fold("")(m => s"mem:$m;")}
          |${gpus.fold("")(g => s"gpus:$g;")}
-         |${ports match {case (f, t) => s"ports:[$f-$t]"}}
+         |${
+        ports match {
+          case (f, t) => s"ports:[$f-$t]"
+        }
+      }
        """.stripMargin.replaceAll("[\n\r]", "");
     }
   }
+
   // format: ON
 
   trait Mesos extends AutoCloseable {
@@ -276,13 +285,13 @@ case class MesosCluster(
     override val workDir = Files.createTempDirectory(s"$suiteName-mesos-master-$port").toFile
     override val processBuilder = Process(
       command = Seq(
-      "mesos",
-      "master",
-      s"--ip=$ip",
-      s"--hostname=$ip",
-      s"--port=$port",
-      s"--zk=$masterUrl",
-      s"--work_dir=${workDir.getAbsolutePath}") ++ extraArgs,
+        "mesos",
+        "master",
+        s"--ip=$ip",
+        s"--hostname=$ip",
+        s"--port=$port",
+        s"--zk=$masterUrl",
+        s"--work_dir=${workDir.getAbsolutePath}") ++ extraArgs,
       cwd = None, extraEnv = mesosEnv(workDir): _*)
 
     val processName: String = "Master"
@@ -299,11 +308,15 @@ case class MesosCluster(
         s"--port=$port",
         s"--resources=${resources.resourceString()}",
         s"--master=$masterUrl",
-        s"--work_dir=${workDir.getAbsolutePath}") ++ extraArgs,
+        s"--work_dir=${workDir.getAbsolutePath}") ++
+        config.secCompConfigDir.map(d => s"--seccomp_config_dir=${d}") ++
+        config.secCompProfileName.map(d => s"--seccomp_profile_name=${d}") ++
+        extraArgs,
       cwd = None, extraEnv = mesosEnv(workDir): _*)
 
     override val processName = "Agent"
   }
+
   // format: ON
 
   def state = new MesosFacade(Await.result(waitForLeader(), waitForMesosTimeout)).state
@@ -315,7 +328,9 @@ case class MesosCluster(
     // Call mesos/teardown for all framework Ids in the cluster and wait for the teardown to complete
     frameworkIds.foreach { fId =>
       facade.teardown(fId)
-      eventually(timeout(1.minutes), interval(2.seconds)) { facade.completedFrameworkIds().value.contains(fId) }
+      eventually(timeout(1.minutes), interval(2.seconds)) {
+        facade.completedFrameworkIds().value.contains(fId)
+      }
     }
   }
 
@@ -336,10 +351,12 @@ case class MesosCluster(
     range(Random.nextInt(range.length))
   }
 }
+
 // format: ON
 
 trait MesosTest {
   def mesos: MesosFacade
+
   val mesosMasterUrl: String
 }
 
@@ -378,6 +395,7 @@ trait MesosClusterTest extends Suite with ZookeeperServerTest with MesosTest wit
 }
 
 object IP {
+
   import sys.process._
 
   lazy val routableIPv4: String =

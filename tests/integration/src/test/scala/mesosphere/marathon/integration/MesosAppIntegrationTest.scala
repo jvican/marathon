@@ -1,8 +1,13 @@
 package mesosphere.marathon
 package integration
 
+import java.io.File
+import java.nio.charset.{Charset, StandardCharsets}
+import java.nio.file.Files
+
 import mesosphere.marathon.Protos.Constraint
 import mesosphere.marathon.Protos.Constraint.Operator.UNIQUE
+import mesosphere.marathon.Protos.ExtendedContainerInfo.LinuxInfo
 import mesosphere.marathon.api.RestResource
 import mesosphere.marathon.core.health.{MesosHttpHealthCheck, PortReference}
 import mesosphere.marathon.core.pod._
@@ -10,11 +15,12 @@ import mesosphere.marathon.core.task.Task
 import mesosphere.marathon.integration.facades.AppMockFacade
 import mesosphere.marathon.integration.facades.MarathonFacade._
 import mesosphere.marathon.integration.setup.{EmbeddedMarathonTest, MesosConfig}
-import mesosphere.marathon.raml.{App, Container, DockerContainer, EngineType}
+import mesosphere.marathon.raml.{App, Container, DockerContainer, EngineType, LinuxInfo}
 import mesosphere.marathon.state.PathId._
 import mesosphere.marathon.state.{HostVolume, PersistentVolume, VolumeMount}
 import mesosphere.mesos.Constraints.hostnameField
 import mesosphere.{AkkaIntegrationTest, WaitTestSupport, WhenEnvSet}
+import org.apache.commons.io.FileUtils
 import org.scalatest.Inside
 import play.api.libs.json.JsObject
 
@@ -22,11 +28,42 @@ import scala.collection.immutable.Seq
 import scala.concurrent.duration._
 
 class MesosAppIntegrationTest extends AkkaIntegrationTest with EmbeddedMarathonTest with Inside {
+
+  val secCompConfigDir = Files.createTempDirectory("mesos-app").toFile
+  val noUnameSecComp = new File(secCompConfigDir, "no-uname.json")
+  FileUtils.writeStringToFile(
+    noUnameSecComp,
+    """
+      |{
+      |    "defaultAction": "SCMP_ACT_ALLOW",
+      |    "archMap": [
+      |        {
+      |            "architecture": "SCMP_ARCH_X86_64",
+      |            "subArchitectures": [
+      |                "SCMP_ARCH_X86",
+      |                "SCMP_ARCH_X32"
+      |            ]
+      |        }
+      |    ],
+      |    "syscalls": [
+      |        {
+      |            "names": ["uname"],
+      |            "action": "SCMP_ACT_ERRNO",
+      |            "args": [],
+      |            "includes": {},
+      |            "excludes": {}
+      |        }
+      |    ]
+      |}
+    """.stripMargin, StandardCharsets.UTF_8)
+
   // Configure Mesos to provide the Mesos containerizer with Docker image support.
   override lazy val mesosConfig = MesosConfig(
     launcher = "linux",
     isolation = Some("filesystem/linux,docker/runtime"),
-    imageProviders = Some("docker"))
+    imageProviders = Some("docker"),
+    secCompProfileName = Some("no-uname.json"),
+    secCompConfigDir = Some(secCompConfigDir.getAbsolutePath))
 
   "MesosApp" should {
     "deploy a simple Docker app using the Mesos containerizer" taggedAs WhenEnvSet(envVarRunMesosTests, default = "true") in {
@@ -564,6 +601,26 @@ class MesosAppIntegrationTest extends AkkaIntegrationTest with EmbeddedMarathonT
       status2 should be(OK)
       //we have only one agent by default, so we expect one instance to be running.
       status2.value.instances should have size 1
+
+    }
+
+    "respects seccomp settings" taggedAs WhenEnvSet(envVarRunMesosTests, default = "true") in {
+      val failingSeccompApp = App(
+        id = (testBasePath / "seccomp-enabled-app").toString,
+        cmd = Some("uname; sleep 600"), // should fail, because by default we are confined
+        container = Some(Container(`type` = EngineType.Mesos, docker = Some(DockerContainer(image = "busybox")))),
+        cpus = 0.2,
+        mem = 16.0
+      )
+
+      When("The app is deployed")
+      val result = marathon.createAppV2(failingSeccompApp)
+
+      Then("The app is created")
+      result should be(Created)
+      extractDeploymentIds(result) should have size 1
+      waitForDeployment(result)
+      waitForTasks(failingSeccompApp.id.toPath, 1) // The app has really started
 
     }
   }
