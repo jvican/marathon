@@ -89,7 +89,11 @@ def killStaleTestProcesses(): Unit = {
     println(s"Running 'sudo kill -9 ${pids.mkString(" ")}")
 
     // We use %% to avoid exceptions. It is not important if the kill fails.
-    try { %%('sudo, 'kill, "-9", pids) }
+    try {
+      val res = %%('sudo, 'kill, "-9", pids)
+      println(res.out.string)
+      println(res.err.string)
+    }
     catch { case e => println(s"Could not kill stale process.") }
 
     // Print stale processes if any exist to see what couldn't be killed:
