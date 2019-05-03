@@ -29,6 +29,7 @@ def installMesos(): Unit = {
 
   maybeVersion match {
     case Some(version) =>
+      println(s"Going to install mesos version $version")
       try { install_mesos(version) }
       catch {
         case NonFatal(_) =>
