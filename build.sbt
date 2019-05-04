@@ -2,13 +2,10 @@ import java.time.{LocalDate, ZoneOffset}
 import java.time.format.DateTimeFormatter
 
 import com.amazonaws.auth.{EnvironmentVariableCredentialsProvider, InstanceProfileCredentialsProvider}
-import com.typesafe.sbt.SbtScalariform.ScalariformKeys
 import com.typesafe.sbt.packager.docker.Cmd
 import mesosphere.maven.MavenSettings.{loadM2Credentials, loadM2Resolvers}
 import mesosphere.raml.RamlGeneratorPlugin
 import NativePackagerHelper.directory
-
-import scalariform.formatter.preferences._
 
 lazy val IntegrationTest = config("integration") extend Test
 
@@ -19,27 +16,6 @@ resolvers += Resolver.sonatypeRepo("snapshots")
 addCompilerPlugin("org.psywerx.hairyfotr" %% "linter" % "0.1.17")
 
 cleanFiles += baseDirectory { base => base / "sandboxes" }.value
-
-lazy val formatSettings = SbtScalariform.scalariformSettings ++ Seq(
-  ScalariformKeys.preferences := FormattingPreferences()
-    .setPreference(AlignArguments, false)
-    .setPreference(AlignParameters, false)
-    .setPreference(AlignSingleLineCaseStatements, false)
-    .setPreference(CompactControlReadability, false)
-    .setPreference(DoubleIndentClassDeclaration, true)
-    .setPreference(DanglingCloseParenthesis, Preserve)
-    .setPreference(FormatXml, true)
-    .setPreference(IndentSpaces, 2)
-    .setPreference(IndentWithTabs, false)
-    .setPreference(MultilineScaladocCommentsStartOnFirstLine, false)
-    .setPreference(PlaceScaladocAsterisksBeneathSecondAsterisk, true)
-    .setPreference(PreserveSpaceBeforeArguments, true)
-    .setPreference(SpacesAroundMultiImports, true)
-    .setPreference(SpaceBeforeColon, false)
-    .setPreference(SpaceInsideBrackets, false)
-    .setPreference(SpaceInsideParentheses, false)
-    .setPreference(SpacesWithinPatternBinders, true)
-)
 
 // Pass arguments to Scalatest runner:
 // http://www.scalatest.org/user_guide/using_the_runner
@@ -292,7 +268,6 @@ lazy val `plugin-interface` = (project in file("plugin-interface"))
     .enablePlugins(GitBranchPrompt, CopyPasteDetector, BasicLintingPlugin, TestWithCoveragePlugin)
     .configs(IntegrationTest)
     .settings(commonSettings : _*)
-    .settings(formatSettings : _*)
     .settings(
       name := "plugin-interface",
       libraryDependencies ++= Dependencies.pluginInterface
@@ -304,7 +279,6 @@ lazy val marathon = (project in file("."))
     CopyPasteDetector, RamlGeneratorPlugin, BasicLintingPlugin, GitVersioning, TestWithCoveragePlugin)
   .dependsOn(`plugin-interface`)
   .settings(commonSettings: _*)
-  .settings(formatSettings: _*)
   .settings(packagingSettings: _*)
   .settings(
     unmanagedResourceDirectories in Compile += file("docs/docs/rest-api"),
@@ -323,7 +297,6 @@ lazy val `mesos-simulation` = (project in file("mesos-simulation"))
   .configs(IntegrationTest)
   .enablePlugins(GitBranchPrompt, CopyPasteDetector, BasicLintingPlugin, TestWithCoveragePlugin)
   .settings(commonSettings: _*)
-  .settings(formatSettings: _*)
   .dependsOn(marathon % "compile->compile; test->test")
   .settings(
     name := "mesos-simulation"
@@ -334,7 +307,6 @@ lazy val benchmark = (project in file("benchmark"))
   .configs(IntegrationTest)
   .enablePlugins(JmhPlugin, GitBranchPrompt, CopyPasteDetector, BasicLintingPlugin, TestWithCoveragePlugin)
   .settings(commonSettings : _*)
-  .settings(formatSettings: _*)
   .dependsOn(marathon % "compile->compile; test->test")
   .settings(
     testOptions in Test += Tests.Argument(TestFrameworks.JUnit),
